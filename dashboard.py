@@ -414,22 +414,73 @@ def _parse_compose(text):
     return result
 
 
+def _read_compose(at_ref):
+    """Fetch the raw test-bed compose at a ref (raises HTTPError/URLError)."""
+    path = f"/repos/{OWNER}/{TESTBED_REPO}/contents/{TESTBED_COMPOSE_PATH}"
+    body, _ = gh(path, {"ref": at_ref}, accept="application/vnd.github.raw", raw=True)
+    return body
+
+
+def _testbed_default_branch():
+    """archive-test-bed's default branch, or None if the token can't see the repo.
+
+    Fetching the compose returns 404 both when the token cannot access the private
+    repo and when the branch/path is wrong. Probing the repo metadata tells the
+    two apart: None here means the repo is not accessible to the token at all.
+    """
+    try:
+        repo_meta, _ = gh(f"/repos/{OWNER}/{TESTBED_REPO}")
+        return repo_meta.get("default_branch") or "main"
+    except urllib.error.HTTPError:
+        return None
+
+
 def fetch_testbed_versions(ref=None):
     """Pull the test-bed docker-compose for a ref and return the parsed image map.
 
     ref defaults to TESTBED_REF ('main'); pass a branch name to read that branch.
+    On a 404 we work out *why* — the token can't see the private repo, or the
+    branch/path is wrong — and retry on the real default branch if it differs.
     """
     ref = ref or TESTBED_REF
-    path = f"/repos/{OWNER}/{TESTBED_REPO}/contents/{TESTBED_COMPOSE_PATH}"
     meta = {"repo": TESTBED_REPO, "ref": ref, "path": TESTBED_COMPOSE_PATH}
+    body = None
     try:
-        body, _ = gh(path, {"ref": ref}, accept="application/vnd.github.raw", raw=True)
+        body = _read_compose(ref)
     except urllib.error.HTTPError as exc:
-        meta["error"] = (
-            f"branch '{ref}' or compose not found" if exc.code == 404 else _http_error_text(exc)
-        )
-        log.warning("test-bed compose @%s unavailable: %s", ref, meta["error"])
-        return {"versions": {}, **meta}
+        if exc.code != 404:
+            meta["error"] = _http_error_text(exc)
+            log.warning("test-bed compose @%s unavailable: %s", ref, meta["error"])
+            return {"versions": {}, **meta}
+        # 404: is the repo invisible to the token, or is the branch/path wrong?
+        default_branch = _testbed_default_branch()
+        if default_branch is None:
+            meta["error"] = (
+                f"DASHBOARD_TOKEN cannot access {OWNER}/{TESTBED_REPO} — on a "
+                "fine-grained token, add this repo to Repository access AND grant "
+                "Contents: read (a repo grant alone is not enough); org-owned "
+                "tokens may also need admin approval"
+            )
+        elif default_branch != ref:
+            try:
+                body = _read_compose(default_branch)
+                meta["ref"] = default_branch
+                log.info("test-bed compose not on '%s'; using default branch '%s'",
+                         ref, default_branch)
+            except urllib.error.HTTPError:
+                meta["error"] = (
+                    f"{OWNER}/{TESTBED_REPO} is reachable but {TESTBED_COMPOSE_PATH} "
+                    f"was not found on '{ref}' or default branch '{default_branch}' "
+                    "— check TESTBED_COMPOSE_PATH / TESTBED_REF"
+                )
+        else:
+            meta["error"] = (
+                f"{OWNER}/{TESTBED_REPO} is reachable but {TESTBED_COMPOSE_PATH} was "
+                f"not found on '{ref}' — check TESTBED_COMPOSE_PATH / TESTBED_REF"
+            )
+        if meta.get("error"):
+            log.warning("test-bed compose unavailable: %s", meta["error"])
+            return {"versions": {}, **meta}
     except (urllib.error.URLError, OSError) as exc:
         reason = getattr(exc, "reason", None) or exc
         meta["error"] = f"network error: {reason}"
@@ -441,7 +492,7 @@ def fetch_testbed_versions(ref=None):
     untracked = sorted(img for img in versions if img not in tracked)
     log.info(
         "test-bed %s@%s: %d ghga images (%d tracked, %d untracked)",
-        TESTBED_REPO, ref, len(versions), len(versions) - len(untracked), len(untracked),
+        TESTBED_REPO, meta["ref"], len(versions), len(versions) - len(untracked), len(untracked),
     )
     return {"versions": versions, "untracked": untracked, "count": len(versions), **meta}
 
@@ -770,6 +821,10 @@ def build_static(out_path="data.json"):
             "no GITHUB_TOKEN/GH_TOKEN set — the build will hit GitHub's 60/hour "
             "unauthenticated limit and most rows will show errors"
         )
+    else:
+        # Confirms the secret is wired up; length distinguishes a fine-grained
+        # token (github_pat_…, ~90+ chars) from a classic PAT (ghp_…, ~40).
+        log.info("building with token (%d chars)", len(TOKEN))
     data = build_payload()
     static = {k: v for k, v in data.items() if k != "rate"}
     static["mode"] = "static"

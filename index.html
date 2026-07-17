@@ -458,14 +458,16 @@ function render() {
     `<div class="chip ${unreleased ? "warn" : ""}"><div class="n">${unreleased}</div><div class="l">Unreleased on main</div></div>`,
     `<div class="chip ${tbBehind ? "warn" : ""}" title="Test-bed pins an older version than the latest release"><div class="n">${tbBehind}</div><div class="l">Behind in test-bed</div></div>`,
     `<div class="chip"><div class="n">${prTotal}</div><div class="l">Open PRs</div></div>`,
-    errs ? `<div class="chip hot"><div class="n">${errs}</div><div class="l">Errors</div></div>` : "",
+    (errs && MODE === "backend") ? `<div class="chip hot"><div class="n">${errs}</div><div class="l">Errors</div></div>` : "",
   ].join("");
 
   // test-bed source note in the subtitle — reflects the active branch override
   const tb = state.tbOverride || d.testbed;
   let tbNote = "";
   if (tb && tb.error) {
-    tbNote = ` · <span style="color:var(--hot-ink)">test-bed unavailable: ${esc(tb.error)}</span>`;
+    tbNote = MODE === "backend"
+      ? ` · <span style="color:var(--hot-ink)">test-bed unavailable: ${esc(tb.error)}</span>`
+      : ` · <span class="when">test-bed data not available in public preview</span>`;
   } else if (tb && tb.repo) {
     const untrk = (tb.untracked && tb.untracked.length)
       ? ` <span title="In the compose but not tracked here: ${esc(tb.untracked.join(", "))}">(${tb.untracked.length} untracked)</span>` : "";
@@ -495,8 +497,12 @@ function render() {
     const mono = r.monorepo ? ' <span class="pill">monorepo</span>' : "";
     const nameLink = `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.repo)}</a>`;
     if (r.error) {
+      // public preview degrades gracefully; the local backend keeps the detail
+      const errCell = MODE === "backend"
+        ? `<span class="err">⚠ ${esc(r.error)}</span>`
+        : `<span class="when">Not available in public preview</span>`;
       html += `<tr class="repo"><td><span class="name">${caret}${nameLink}${mono}</span></td>`
-            + `<td colspan="5"><span class="err">⚠ ${esc(r.error)}</span></td></tr>`;
+            + `<td colspan="5">${errCell}</td></tr>`;
     } else {
       html += `<tr class="repo">`
         + `<td><span class="name">${caret}${nameLink}${mono}</span></td>`
