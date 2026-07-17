@@ -23,6 +23,12 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Generate app token for writing to protected `gitops` branch
+        id: generate_token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.DASHBOARD_APP_ID }}
+          private-key: ${{ secrets.DASHBOARD_APP_KEY }}
       - uses: actions/checkout@v4
       # Requires Pages to be allowed for the repo/org.
       - uses: actions/configure-pages@v5
@@ -32,7 +38,7 @@ jobs:
       # only, so no install step is needed.
       - name: Build data.json
         env:
-          GH_TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
         run: python3 dashboard.py build data.json
       - uses: actions/upload-pages-artifact@v3
         with:
