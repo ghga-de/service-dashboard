@@ -21,10 +21,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # One-time setup: enable Pages first (repo Settings → Pages → Source:
-      # "GitHub Actions") — the default GITHUB_TOKEN cannot enable it itself.
       - uses: actions/checkout@v4
+      # enablement: true lets this action create the Pages site on first run,
+      # so no manual "Settings -> Pages -> Source: GitHub Actions" step is needed.
+      # Requires Pages to be allowed for the repo/org.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
