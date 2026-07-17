@@ -23,7 +23,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Generate app token for writing to protected `gitops` branch
+      - name: Generate app token for reading service repositories
         id: generate_token
         uses: actions/create-github-app-token@v3
         with:
