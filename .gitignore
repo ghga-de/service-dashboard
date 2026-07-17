@@ -1,0 +1,17 @@
+# OS / editor cruft
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets & credentials
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.p12
+*.pfx

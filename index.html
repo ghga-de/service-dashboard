@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Defence-in-depth: the page holds a GitHub PAT (sessionStorage), so lock outbound
+     requests to GitHub + same-origin. 'unsafe-inline' is required because the script and
+     styles are inlined in this single file; connect-src is the directive that guards the token. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GHGA Service Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #6b7280;
+    --line: #e6e8eb; --line2: #eef0f2;
+    --accent: #2b6cb0; --accent-ink: #1a4a80;
+    --ok-bg: #e7f6ec; --ok-ink: #1f7a44;
+    --warn-bg: #fdf0d5; --warn-ink: #8a5a00;
+    --hot-bg: #fde2e1; --hot-ink: #a62a25;
+    --chip: #eef1f5; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8eaed; --muted: #9aa3ad;
+      --line: #262c34; --line2: #20262d;
+      --accent: #6aa9e0; --accent-ink: #8ec0ee;
+      --ok-bg: #16321f; --ok-ink: #6cd398;
+      --warn-bg: #3a2f12; --warn-ink: #e7b75a;
+      --hot-bg: #3a1f1d; --hot-ink: #f08a85;
+      --chip: #222831; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 22px 20px 60px; }
+
+  header.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 19px; margin: 0; letter-spacing: -.2px; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .meta { text-align: right; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  .meta .row { display: flex; gap: 8px; align-items: center; }
+
+  button {
+    font: inherit; cursor: pointer; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); border-radius: 8px;
+    padding: 7px 13px; box-shadow: var(--shadow);
+  }
+  button:hover { border-color: var(--accent); }
+  button[disabled] { opacity: .55; cursor: default; }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+
+  .chips { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 16px; }
+  .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 13px; box-shadow: var(--shadow); min-width: 96px; }
+  .chip .n { font-size: 19px; font-weight: 650; letter-spacing: -.3px; }
+  .chip .l { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .chip.hot .n { color: var(--hot-ink); }
+  .chip.warn .n { color: var(--warn-ink); }
+
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .controls input[type=search] {
+    font: inherit; padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); color: var(--ink); min-width: 220px;
+  }
+  .controls label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .tbctl { display: inline-flex; gap: 7px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+  .tblabel { font-size: 13px; color: var(--muted); }
+  #tbBranch {
+    font: inherit; padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); color: var(--ink); width: 170px;
+  }
+  #tbBranch:focus { outline: none; border-color: var(--accent); }
+  button.small { padding: 6px 11px; font-size: 13px; }
+  #tbStatus { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  #tbStatus .ok-text { color: var(--accent-ink); font-weight: 600; }
+  #tbRefTag { text-transform: none; font-weight: 600; margin-right: 4px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  thead th {
+    text-align: left; font-weight: 600; font-size: 11.5px; letter-spacing: .4px; text-transform: uppercase;
+    color: var(--muted); padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; cursor: pointer; user-select: none;
+  }
+  thead th.nosort { cursor: default; }
+  thead th .arr { opacity: .5; font-size: 10px; }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  tbody tr.repo:hover { background: rgba(127,127,127,.045); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .name { font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
+  .caret { color: var(--muted); width: 14px; display: inline-block; text-align: center; cursor: pointer; transition: transform .12s ease; }
+  .caret.open { transform: rotate(90deg); }
+  .tag { font-weight: 600; }
+  .when { color: var(--muted); font-size: 12px; }
+  .dash { color: var(--muted); }
+
+  .badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .b-ok { background: var(--ok-bg); color: var(--ok-ink); }
+  .b-warn { background: var(--warn-bg); color: var(--warn-ink); }
+  .b-hot { background: var(--hot-bg); color: var(--hot-ink); }
+  .b-mut { background: var(--chip); color: var(--muted); }
+  .prbtn { cursor: pointer; border: none; box-shadow: none; padding: 2px 9px; }
+  .newer { font-size: 11px; color: var(--warn-ink); margin-left: 6px; }
+
+  tr.detail td { background: rgba(127,127,127,.04); padding: 0; }
+  .detail-inner { padding: 12px 16px 16px 40px; display: grid; gap: 16px; }
+  .detail h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+  table.inner { width: auto; min-width: 420px; font-size: 13px; }
+  table.inner th, table.inner td { padding: 5px 12px 5px 0; border: none; text-align: left; }
+  table.inner th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .3px; }
+  ul.prs { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+  ul.prs li { display: flex; gap: 8px; align-items: baseline; }
+  ul.prs .num { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; min-width: 52px; }
+  .pill { font-size: 10.5px; padding: 0 6px; border-radius: 6px; background: var(--chip); color: var(--muted); }
+
+  .err { color: var(--hot-ink); font-size: 12.5px; }
+  .banner { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid transparent; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+  .banner.hot { background: var(--hot-bg); color: var(--hot-ink); }
+  .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sp .7s linear infinite; vertical-align: -2px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .center { text-align: center; color: var(--muted); padding: 40px; }
+
+  .foot { margin-top: 20px; text-align: center; font-size: 12px; color: var(--muted); }
+  .foot .mono { color: var(--muted); }
+
+  /* export modal */
+  .modal { position: fixed; inset: 0; background: rgba(10,14,20,.55); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.3); width: 100%; max-width: 560px; max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; }
+  .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .modal-head strong { font-size: 15px; }
+  .modal-fmt { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; padding: 11px 16px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line2); }
+  .modal-fmt label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; color: var(--ink); }
+  #exportText {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5;
+    border: none; resize: none; width: 100%; flex: 1; min-height: 240px; padding: 14px 16px;
+    background: var(--bg); color: var(--ink); outline: none;
+  }
+  .modal-actions { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line); }
+  .modal-actions .grow { margin-left: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>GHGA Service Dashboard</h1>
+      <div class="sub" id="sub">Release &amp; PR status across the service landscape</div>
+    </div>
+    <div class="meta">
+      <div class="row" id="ratebox"></div>
+      <div class="row">
+        <span id="updated"></span>
+        <button id="tokenBtn" style="display:none">Token</button>
+        <button id="exportBtn">Export</button>
+        <button class="primary" id="refresh">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner"></div>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="controls">
+    <input type="search" id="search" placeholder="Filter repositories…" autocomplete="off">
+    <label><input type="checkbox" id="attn"> Needs attention only</label>
+    <span class="tbctl">
+      <span class="tblabel">Test-bed branch</span>
+      <input type="text" id="tbBranch" placeholder="main" autocomplete="off" spellcheck="false">
+      <button id="tbApply" class="small">Load</button>
+      <span id="tbStatus"></span>
+    </span>
+  </div>
+
+  <div class="panel scroll">
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th data-sort="repo">Repository <span class="arr"></span></th>
+          <th data-sort="release">Latest release <span class="arr"></span></th>
+          <th data-sort="testbed">Test-bed <span id="tbRefTag" class="when"></span><span class="arr"></span></th>
+          <th data-sort="prerelease">Latest pre-release <span class="arr"></span></th>
+          <th data-sort="prs">Open PRs <span class="arr"></span></th>
+          <th data-sort="main">Main vs release <span class="arr"></span></th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="6" class="center"><span class="spin"></span> Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer class="foot" id="foot"></footer>
+</div>
+
+<div id="exportModal" class="modal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div><strong>Latest service releases</strong><div class="when" id="exportMeta"></div></div>
+      <button id="exportClose" class="small">✕</button>
+    </div>
+    <div class="modal-fmt">
+      Format:
+      <label><input type="radio" name="efmt" value="image" checked> image:tag</label>
+      <label><input type="radio" name="efmt" value="colon"> name: version</label>
+      <label><input type="radio" name="efmt" value="plain"> name&nbsp;&nbsp;version</label>
+    </div>
+    <textarea id="exportText" readonly spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <button id="exportCopy" class="primary">Copy</button>
+      <button id="exportDownload">Download .txt</button>
+      <button id="exportClose2" class="grow">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="tokenModal" class="modal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div><strong>GitHub token</strong><div class="when">Kept in this tab's sessionStorage only — sent nowhere except api.github.com.</div></div>
+      <button id="tokenClose" class="small">✕</button>
+    </div>
+    <div style="padding:16px; display:grid; gap:10px;">
+      <input type="password" id="tokenInput" placeholder="ghp_… or github_pat_…" autocomplete="off" spellcheck="false"
+             style="font: inherit; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink);">
+      <div class="when">
+        Without a token GitHub allows only 60 API requests/hour, so the dashboard runs in lite mode
+        (releases and open PRs only). A token unlocks 5,000/hour plus the main-vs-release,
+        test-bed and per-service columns.<br><br>
+        Public repos: any PAT, no scopes needed. The test-bed column reads the private
+        <code>archive-test-bed</code> repo: classic PAT with <code>repo</code>, or a fine-grained
+        token with read access to the <code>ghga-de</code> repositories.
+        <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">Create one</a>.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="tokenSave" class="primary">Save &amp; refresh</button>
+      <button id="tokenClear">Clear token</button>
+      <button id="tokenClose2" class="grow">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const APP_VERSION = "1.0.0";
+const state = { data: null, sortKey: "attention", sortDir: "desc", query: "", attn: false, open: {},
+                tbRef: null, tbOverride: null };
+const $ = (s) => document.querySelector(s);
+
+// Active test-bed entry for a repo/service: branch override when set, else the
+// server-computed value from the (main) payload.
+function repoTestbed(r) { return state.tbOverride ? (state.tbOverride.repos[r.repo] || null) : (r.testbed || null); }
+function svcTestbed(s) { return state.tbOverride ? (state.tbOverride.services[s.service] || null) : (s.testbed || null); }
+
+// ---- formatting helpers ---------------------------------------------------
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+function parseDate(s) { return s ? new Date(s) : null; }
+function relTime(iso) {
+  if (!iso) return "";
+  const d = parseDate(iso), now = Date.now();
+  let s = Math.round((now - d.getTime()) / 1000);
+  const past = s >= 0; s = Math.abs(s);
+  const u = [["year",31536000],["month",2592000],["week",604800],["day",86400],["hour",3600],["minute",60]];
+  for (const [name, secs] of u) {
+    if (s >= secs) { const n = Math.floor(s / secs); return past ? `${n} ${name}${n>1?"s":""} ago` : `in ${n} ${name}${n>1?"s":""}`; }
+  }
+  return "just now";
+}
+function absDate(iso) { if (!iso) return ""; const d = parseDate(iso); return d.toISOString().slice(0,10) + " " + d.toISOString().slice(11,16) + "Z"; }
+
+// ---- sort/filter ----------------------------------------------------------
+function attentionScore(r) {
+  let s = 0;
+  if (r.main && r.main.ahead_by > 0) s += 100000 + r.main.ahead_by;
+  if (r.open_prs && r.open_prs.count) s += r.open_prs.count;
+  if (r.error) s += 50000;
+  return s;
+}
+// rank test-bed drift: behind/conflict highest, then ahead, differs, match
+function testbedScore(r) {
+  const rank = { behind: 4, conflict: 4, ahead: 2, differs: 1, match: 0 };
+  const verdicts = r.monorepo
+    ? (r.services || []).map(s => { const t = svcTestbed(s); return t && t.vs_latest; })
+    : [(repoTestbed(r) || {}).vs_latest];
+  let max = -1;
+  for (const v of verdicts) if (v != null && rank[v] != null && rank[v] > max) max = rank[v];
+  return max;
+}
+function sortVal(r, key) {
+  switch (key) {
+    case "repo": return r.repo.toLowerCase();
+    case "release": return r.latest_release ? +parseDate(r.latest_release.published_at) : -1;
+    case "testbed": return testbedScore(r);
+    case "prerelease": return r.latest_prerelease ? +parseDate(r.latest_prerelease.published_at) : -1;
+    case "prs": return r.open_prs ? r.open_prs.count : -1;
+    case "main": return r.main && typeof r.main.ahead_by === "number" ? r.main.ahead_by : -1;
+    default: return attentionScore(r);
+  }
+}
+function visibleRepos() {
+  let rows = (state.data.repos || []).slice();
+  const q = state.query.trim().toLowerCase();
+  if (q) rows = rows.filter(r => r.repo.toLowerCase().includes(q));
+  if (state.attn) rows = rows.filter(r => (r.main && r.main.ahead_by > 0) || (r.open_prs && r.open_prs.count > 0) || r.error);
+  const dir = state.sortDir === "asc" ? 1 : -1;
+  rows.sort((a, b) => {
+    const va = sortVal(a, state.sortKey), vb = sortVal(b, state.sortKey);
+    if (va < vb) return -1 * dir; if (va > vb) return 1 * dir;
+    return a.repo.localeCompare(b.repo);
+  });
+  return rows;
+}
+
+// ---- cell renderers -------------------------------------------------------
+function releaseCell(rel) {
+  if (!rel) return '<span class="dash">—</span>';
+  const link = rel.html_url ? `href="${esc(rel.html_url)}" target="_blank" rel="noopener"` : "";
+  return `<a class="tag mono" ${link}>${esc(rel.tag || rel.name || "?")}</a>`
+    + (rel.published_at ? `<div class="when" title="${esc(absDate(rel.published_at))}">${esc(relTime(rel.published_at))}</div>` : "");
+}
+function prereleaseCell(r) {
+  const pre = r.latest_prerelease;
+  if (!pre) return '<span class="dash">—</span>';
+  let newer = "";
+  if (r.latest_release && pre.published_at && r.latest_release.published_at
+      && parseDate(pre.published_at) > parseDate(r.latest_release.published_at)) newer = '<span class="newer">newer than release</span>';
+  const link = pre.html_url ? `href="${esc(pre.html_url)}" target="_blank" rel="noopener"` : "";
+  return `<a class="tag mono" ${link}>${esc(pre.tag || "?")}</a>${newer}`
+    + (pre.published_at ? `<div class="when" title="${esc(absDate(pre.published_at))}">${esc(relTime(pre.published_at))}</div>` : "");
+}
+function prsCell(r) {
+  const p = r.open_prs;
+  if (!p) return '<span class="dash">—</span>';
+  if (!p.count) return '<span class="badge b-mut">0</span>';
+  const label = p.capped ? "100+" : p.count;
+  return `<button class="badge b-warn prbtn" data-toggle="${esc(r.repo)}" title="Show open PRs">${label} open</button>`;
+}
+function mainCell(r) {
+  const m = r.main;
+  if (!m) return '<span class="badge b-mut" title="No release to compare against">no release</span>';
+  if (m.needs_token) return '<span class="badge b-mut" title="Comparing main against the release needs a GitHub token">needs token</span>';
+  if (m.error) return `<span class="badge b-mut" title="${esc(m.error)}">unknown</span>`;
+  const compareLink = m.html_url ? `<a href="${esc(m.html_url)}" target="_blank" rel="noopener" title="View comparison on GitHub">` : "<span>";
+  const end = m.html_url ? "</a>" : "</span>";
+  if (m.ahead_by > 0) {
+    const cls = m.ahead_by >= 10 ? "b-hot" : "b-warn";
+    const behind = m.behind_by ? ` · ${m.behind_by} behind` : "";
+    return `${compareLink}<span class="badge ${cls}">▲ ${m.ahead_by} unreleased${behind} on ${esc(m.branch || "main")}</span>${end}`;
+  }
+  return `${compareLink}<span class="badge b-ok">✓ up to date</span>${end}`;
+}
+
+// shared styling for a test-bed-vs-latest verdict
+const TB_STYLE = {
+  match:    { cls: "b-ok",   sym: "✓", word: "latest",   note: "matches the latest release" },
+  behind:   { cls: "b-warn", sym: "▼", word: "behind",   note: "older than the latest release" },
+  ahead:    { cls: "b-hot",  sym: "▲", word: "ahead",    note: "newer than the latest release (unreleased)" },
+  differs:  { cls: "b-mut",  sym: "≠", word: "differs",  note: "differs from the latest release" },
+  conflict: { cls: "b-hot",  sym: "⚠", word: "conflict", note: "instances pin different versions" },
+  unknown:  { cls: "b-mut",  sym: "",  word: "?",        note: "no latest release to compare against" },
+};
+function testbedBadge(t) {
+  const s = TB_STYLE[t.vs_latest] || TB_STYLE.unknown;
+  return `<span class="mono tag">${esc(t.version)}</span> `
+    + `<span class="badge ${s.cls}" title="${esc(s.note)}">${s.sym} ${s.word}</span>`;
+}
+function testbedCell(r) {
+  if (r.monorepo) {
+    return (r.services && r.services.length)
+      ? '<span class="when" title="see per-service versions below">per service ↓</span>'
+      : '<span class="dash" title="per-service versions need a GitHub token">—</span>';
+  }
+  const t = repoTestbed(r);
+  if (!t) return '<span class="dash" title="not deployed in the test-bed">—</span>';
+  return testbedBadge(t);
+}
+
+function detailRow(r) {
+  let parts = [];
+  if (r.services && r.services.length) {
+    let body = r.services.map(s => {
+      const changed = s.changed ? '<span class="pill" style="background:var(--warn-bg);color:var(--warn-ink)">changed</span>' : "";
+      const rv = s.released ? `<span class="mono">${esc(s.released)}</span>` : '<span class="dash">—</span>';
+      const mv = s.main ? `<span class="mono">${esc(s.main)}</span>` : '<span class="dash">—</span>';
+      const st = svcTestbed(s);
+      const tb = st ? testbedBadge(st) : '<span class="dash" title="not in the test-bed">—</span>';
+      return `<tr><td><strong>${esc(s.service)}</strong></td><td>${rv}</td><td>${mv} ${changed}</td><td>${tb}</td><td class="mono" style="color:var(--muted)">${esc(s.image)}</td></tr>`;
+    }).join("");
+    parts.push(`<div><h4>Service versions (released vs. main vs. test-bed)</h4>
+      <table class="inner"><thead><tr><th>Service</th><th>Released</th><th>On main</th><th>Test-bed</th><th>Image</th></tr></thead><tbody>${body}</tbody></table></div>`);
+  }
+  if (r.open_prs && r.open_prs.items && r.open_prs.items.length) {
+    const items = r.open_prs.items.map(pr => {
+      const draft = pr.draft ? '<span class="pill">draft</span>' : "";
+      const who = pr.user ? `<span class="when">@${esc(pr.user)} · ${esc(relTime(pr.updated_at))}</span>` : "";
+      return `<li><span class="num">#${esc(pr.number)}</span><a href="${esc(pr.html_url)}" target="_blank" rel="noopener">${esc(pr.title)}</a> ${draft} ${who}</li>`;
+    }).join("");
+    const more = r.open_prs.count > r.open_prs.items.length ? `<li class="when">…and ${r.open_prs.count - r.open_prs.items.length} more</li>` : "";
+    parts.push(`<div><h4>Open pull requests (${r.open_prs.capped ? "100+" : r.open_prs.count})</h4><ul class="prs">${items}${more}</ul></div>`);
+  }
+  if (!parts.length) parts.push('<div class="when">Nothing to expand.</div>');
+  return `<tr class="detail" data-detail="${esc(r.repo)}"><td colspan="6"><div class="detail-inner">${parts.join("")}</div></td></tr>`;
+}
+
+// ---- main render ----------------------------------------------------------
+function render() {
+  const d = state.data;
+  if (!d) return;
+
+  // meta + rate
+  $("#updated").innerHTML = d.generated_at
+    ? `Updated ${esc(relTime(d.generated_at))}${d.cached ? " (cached)" : ""}` : "";
+  let rb = "";
+  if (!d.authenticated) rb = '<span class="badge b-hot">no token</span> ';
+  if (d.rate && d.rate.remaining != null) {
+    const low = d.authenticated ? 200 : 10;
+    const cls = d.rate.remaining < low ? "b-hot" : "b-mut";
+    const usedWindow = (d.rate.limit != null) ? d.rate.limit - d.rate.remaining : null;
+    const resets = d.rate.reset ? `, resets ${relTime(new Date(d.rate.reset * 1000).toISOString())}` : "";
+    let lastBuild;
+    if (d.cached) {
+      lastBuild = `This view was served from cache (0 calls)`
+        + (d.rate.used_last_build != null ? `; the last real refresh spent ${d.rate.used_last_build}. ` : ". ");
+    } else if (d.rate.used_last_build != null) {
+      lastBuild = `This refresh spent ${d.rate.used_last_build} calls. `;
+    } else {
+      lastBuild = d.lite ? `One lite refresh ≈ 35 calls (cached 60s). ` : `One refresh ≈ 80 calls (cached 60s). `;
+    }
+    const tip = (d.authenticated ? `GitHub hourly quota for your token` : `GitHub hourly quota (unauthenticated)`)
+      + (usedWindow != null ? ` — ${usedWindow} used this window, ${d.rate.remaining} still available${resets}. ` : ". ")
+      + lastBuild
+      + `The number is cumulative across refreshes within the window, not per-run.`;
+    const suffix = (!d.cached && d.rate.used_last_build != null) ? ` · −${d.rate.used_last_build}` : "";
+    rb += `<span class="badge ${cls}" title="${esc(tip)}">${d.rate.remaining} / ${d.rate.limit} GitHub API quota left${suffix}</span>`;
+  }
+  $("#ratebox").innerHTML = rb;
+
+  // banner for global problems
+  let banner = "";
+  if (!d.authenticated) {
+    banner = MODE === "backend"
+      ? `<div class="banner hot"><strong>No GITHUB_TOKEN set.</strong> GitHub allows only 60 unauthenticated requests/hour and a refresh needs ~60, so most rows below may show errors. Stop the server, run <code>export GITHUB_TOKEN=…</code>, and restart <code>dashboard.py</code>.</div>`
+      : `<div class="banner"><strong>Lite mode — no token.</strong> Showing releases and open PRs only (≈35 of GitHub's 60 unauthenticated requests/hour per refresh; the "latest" release is the newest by date, not GitHub's pinned Latest). Add a token for the main-vs-release, test-bed and per-service columns. <button class="small" data-token-open>Add token</button></div>`;
+  }
+  $("#banner").innerHTML = banner;
+
+  // summary chips
+  const repos = d.repos || [];
+  const unreleased = repos.filter(r => r.main && r.main.ahead_by > 0).length;
+  const prTotal = repos.reduce((a, r) => a + (r.open_prs ? r.open_prs.count : 0), 0);
+  const errs = repos.filter(r => r.error).length;
+  // count services whose test-bed pin is behind the latest release (drift)
+  let tbBehind = 0;
+  for (const r of repos) {
+    if (r.monorepo) { for (const s of (r.services || [])) { const t = svcTestbed(s); if (t && t.vs_latest === "behind") tbBehind++; } }
+    else { const t = repoTestbed(r); if (t && t.vs_latest === "behind") tbBehind++; }
+  }
+  $("#chips").innerHTML = [
+    `<div class="chip"><div class="n">${repos.length}</div><div class="l">Repositories</div></div>`,
+    `<div class="chip ${unreleased ? "warn" : ""}"><div class="n">${unreleased}</div><div class="l">Unreleased on main</div></div>`,
+    `<div class="chip ${tbBehind ? "warn" : ""}" title="Test-bed pins an older version than the latest release"><div class="n">${tbBehind}</div><div class="l">Behind in test-bed</div></div>`,
+    `<div class="chip"><div class="n">${prTotal}</div><div class="l">Open PRs</div></div>`,
+    errs ? `<div class="chip hot"><div class="n">${errs}</div><div class="l">Errors</div></div>` : "",
+  ].join("");
+
+  // test-bed source note in the subtitle — reflects the active branch override
+  const tb = state.tbOverride || d.testbed;
+  let tbNote = "";
+  if (tb && tb.error) {
+    tbNote = ` · <span style="color:var(--hot-ink)">test-bed unavailable: ${esc(tb.error)}</span>`;
+  } else if (tb && tb.repo) {
+    const untrk = (tb.untracked && tb.untracked.length)
+      ? ` <span title="In the compose but not tracked here: ${esc(tb.untracked.join(", "))}">(${tb.untracked.length} untracked)</span>` : "";
+    const override = state.tbOverride ? " <strong>(branch override)</strong>" : "";
+    tbNote = ` · test-bed <code>${esc(tb.repo)}@${esc(tb.ref)}</code> — ${tb.count} images${untrk}${override}`;
+  }
+  $("#sub").innerHTML = "Release, test-bed &amp; PR status across the service landscape" + tbNote;
+  // column header shows which branch the Test-bed values come from
+  const refTag = $("#tbRefTag");
+  if (refTag) refTag.textContent = "@" + (state.tbRef || (d.testbed && d.testbed.ref) || "main");
+
+  // sort arrows
+  document.querySelectorAll("thead th[data-sort]").forEach(th => {
+    const arr = th.querySelector(".arr");
+    arr.textContent = th.dataset.sort === state.sortKey ? (state.sortDir === "asc" ? "▲" : "▼") : "";
+  });
+
+  // rows
+  const rows = visibleRepos();
+  if (!rows.length) { $("#rows").innerHTML = '<tr><td colspan="6" class="center">No repositories match.</td></tr>'; return; }
+
+  let html = "";
+  for (const r of rows) {
+    const expandable = (r.services && r.services.length) || (r.open_prs && r.open_prs.count > 0);
+    const isOpen = !!state.open[r.repo];
+    const caret = expandable ? `<span class="caret ${isOpen ? "open" : ""}" data-toggle="${esc(r.repo)}">▶</span>` : '<span class="caret" style="visibility:hidden">▶</span>';
+    const mono = r.monorepo ? ' <span class="pill">monorepo</span>' : "";
+    const nameLink = `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.repo)}</a>`;
+    if (r.error) {
+      html += `<tr class="repo"><td><span class="name">${caret}${nameLink}${mono}</span></td>`
+            + `<td colspan="5"><span class="err">⚠ ${esc(r.error)}</span></td></tr>`;
+    } else {
+      html += `<tr class="repo">`
+        + `<td><span class="name">${caret}${nameLink}${mono}</span></td>`
+        + `<td>${releaseCell(r.latest_release)}</td>`
+        + `<td>${testbedCell(r)}</td>`
+        + `<td>${prereleaseCell(r)}</td>`
+        + `<td>${prsCell(r)}</td>`
+        + `<td>${mainCell(r)}</td>`
+        + `</tr>`;
+    }
+    if (isOpen && expandable) html += detailRow(r);
+  }
+  $("#rows").innerHTML = html;
+}
+
+// ---- direct GitHub mode -----------------------------------------------------
+// When there is no dashboard.py backend (GitHub Pages, or the file opened
+// directly), the page talks to api.github.com itself and assembles the exact
+// payload /api/data would have returned. Mirrors dashboard.py's collectors.
+//
+// Without a token it runs in "lite" mode — 2 calls per repo (releases + PRs),
+// staying inside GitHub's 60/hour unauthenticated budget — and the columns that
+// would need more calls or private access show a "needs token" state instead.
+
+const OWNER = "ghga-de";
+const STANDALONE_REPOS = [
+  "dataset-information-service",
+  "datahub-file-service",
+  "ghga-connector",
+  "ghga-registry-service",
+  "auth-service",
+  "data-portal",
+  "work-package-service",
+  "access-request-service",
+  "mass",
+  "metldata",
+  "well-known-value-service",
+  "dlq-service",
+  "notification-service",
+  "notification-orchestration-service",
+  "reverse-transpiler-service",
+  "state-management-service",
+];
+const MONOREPO = "file-services-backend";
+const FSB_SERVICES = {
+  dcs: "ghga/download-controller-service",
+  ekss: "ghga/encryption-key-store-service",
+  ucs: "ghga/upload-controller-service",
+  ifrs: "ghga/internal-file-registry-service",
+  fis: "ghga/file-ingest-service",
+  pcs: "ghga/purge-controller-service",
+};
+const TESTBED_REPO = "archive-test-bed";
+const TESTBED_REF = "main";
+const TESTBED_COMPOSE_PATH = ".devcontainer/docker-compose.yml";
+
+const API = "https://api.github.com";
+const HTTP_RETRIES = 3;
+const REQUEST_SPACING = 50;      // ms between request starts (abuse-detector safety)
+const PAYLOAD_TTL = 60_000;      // ms — page reloads within this reuse the last build
+const VERSION_RE = /^version\s*=\s*"([^"]+)"/m;
+const COMPOSE_IMAGE_RE = /^\s*image:\s*["']?ghga\/([A-Za-z0-9._-]+):([A-Za-z0-9._+-]+)["']?\s*$/;
+
+let MODE = "direct";             // "backend" (dashboard.py) or "direct" (api.github.com)
+
+const TOKEN_KEY = "ghdash.token";
+function getToken() { try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
+function setToken(t) { try { t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const backoff = (attempt) => Math.min(250 * 2 ** (attempt - 1), 2000) + Math.random() * 200;
+
+// space request starts out; a shared promise chain plays the role of the
+// throttle lock in dashboard.py
+let _lastStart = 0, _throttleChain = Promise.resolve();
+function throttled() {
+  const p = _throttleChain.then(async () => {
+    const wait = _lastStart + REQUEST_SPACING - Date.now();
+    if (wait > 0) await sleep(wait);
+    _lastStart = Date.now();
+  });
+  _throttleChain = p.catch(() => {});
+  return p;
+}
+
+class GhError extends Error {
+  constructor(status, statusText, headers, url) {
+    super(`HTTP ${status} ${statusText}`);
+    this.status = status; this.statusText = statusText; this.headers = headers; this.url = url;
+  }
+}
+
+function httpErrorText(e) {
+  if (!(e instanceof GhError)) return `network error: ${e.message}`;
+  if ((e.status === 403 || e.status === 429) && e.headers.get("x-ratelimit-remaining") === "0") {
+    const reset = e.headers.get("x-ratelimit-reset");
+    let when = "";
+    if (reset && /^\d+$/.test(reset)) when = " — resets " + new Date(+reset * 1000).toISOString().slice(11, 19) + " UTC";
+    return "GitHub rate limit exceeded" + when;
+  }
+  if (e.status === 401) return "GitHub rejected the token (bad credentials)";
+  if (e.status === 404) return "not found (renamed, private, or token lacks access)";
+  return `HTTP ${e.status} ${e.statusText}`;
+}
+
+async function ghOnce(url, accept, etag) {
+  await throttled();
+  const headers = { "Accept": accept, "X-GitHub-Api-Version": "2022-11-28" };
+  const token = getToken();
+  if (token) headers["Authorization"] = "Bearer " + token;
+  if (etag) headers["If-None-Match"] = etag;
+  const res = await fetch(url, { headers });
+  if (res.status === 304) return { notModified: true };
+  if (!res.ok) throw new GhError(res.status, res.statusText, res.headers, url);
+  return { body: await res.text(), etag: res.headers.get("etag") };
+}
+
+async function ghRequest(url, accept, etag) {
+  // Same retry policy as dashboard.py: transient failures (network, 5xx,
+  // secondary rate limit with a short Retry-After) back off and retry;
+  // deterministic errors (404, primary rate-limit exhaustion) fail fast.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await ghOnce(url, accept, etag);
+    } catch (e) {
+      let wait = null;
+      if (e instanceof GhError) {
+        if ([500, 502, 503, 504].includes(e.status)) wait = backoff(attempt);
+        else if (e.status === 403 || e.status === 429) {
+          const ra = (e.headers.get("retry-after") || "").trim();
+          if (/^\d+$/.test(ra)) wait = Math.min(+ra, 8) * 1000;
+        }
+      } else {
+        wait = backoff(attempt); // fetch TypeError: DNS / connection / offline
+      }
+      if (wait == null || attempt >= HTTP_RETRIES) throw e;
+      console.warn(`retrying ${url} in ${Math.round(wait)}ms (attempt ${attempt}/${HTTP_RETRIES}): ${e.message}`);
+      await sleep(wait);
+    }
+  }
+}
+
+// ETag cache: GitHub does not count conditional requests answered with 304
+// against the rate limit, so repeat refreshes are nearly free. Only the
+// reduced value is stored (not the raw response) to keep localStorage small.
+function cacheGet(url) { try { return JSON.parse(localStorage.getItem("ghdash.etag." + url) || "null"); } catch (e) { return null; } }
+function cachePut(url, etag, value) { try { localStorage.setItem("ghdash.etag." + url, JSON.stringify({ etag, value })); } catch (e) {} }
+
+async function gh(path, params, opts) {
+  const { accept = "application/vnd.github+json", raw = false, reduce = (x) => x, noCache = false } = opts || {};
+  let url = API + path;
+  if (params) url += "?" + new URLSearchParams(params);
+  const hit = noCache ? null : cacheGet(url);
+  const res = await ghRequest(url, accept, hit && hit.etag);
+  if (res.notModified) return hit.value;
+  const payload = raw ? res.body : (res.body ? JSON.parse(res.body) : null);
+  const value = reduce(payload);
+  if (!noCache && res.etag) cachePut(url, res.etag, value);
+  return value;
+}
+
+async function mapPool(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+// ---- collectors (ports of dashboard.py) ----
+function fmtRelease(rel) {
+  if (!rel) return null;
+  return { tag: rel.tag_name, name: rel.name || rel.tag_name,
+           published_at: rel.published_at || rel.created_at, html_url: rel.html_url };
+}
+
+async function releaseInfo(repo, lite) {
+  // The releases list (newest-first) yields the prerelease, the count, and — in
+  // lite mode — an approximate "latest" (newest non-draft full release; may
+  // differ from the release GitHub pins as Latest, which costs an extra call).
+  const list = await gh(`/repos/${OWNER}/${repo}/releases`, { per_page: "100" }, {
+    reduce: (data) => {
+      const rels = data || [];
+      return {
+        prerelease: fmtRelease(rels.find(r => r.prerelease && !r.draft) || null),
+        newestFull: fmtRelease(rels.find(r => !r.prerelease && !r.draft) || null),
+        count: rels.length,
+      };
+    },
+  });
+  let latest = list.newestFull;
+  if (!lite) {
+    try {
+      latest = await gh(`/repos/${OWNER}/${repo}/releases/latest`, null, { reduce: fmtRelease });
+    } catch (e) {
+      if (!(e instanceof GhError && e.status === 404)) throw e; // 404 => no full release
+      latest = null;
+    }
+  }
+  return { latest, prerelease: list.prerelease, count: list.count };
+}
+
+async function openPrInfo(repo) {
+  return gh(`/repos/${OWNER}/${repo}/pulls`,
+    { state: "open", per_page: "100", sort: "updated", direction: "desc" }, {
+      reduce: (data) => {
+        const items = (data || []).map(p => ({
+          number: p.number, title: p.title, html_url: p.html_url,
+          draft: !!p.draft, user: p.user ? p.user.login : null, updated_at: p.updated_at,
+        }));
+        return { count: items.length, capped: items.length === 100, items: items.slice(0, 50) };
+      },
+    });
+}
+
+async function compareRepo(repo, base, head) {
+  const seg = encodeURIComponent(base) + "..." + encodeURIComponent(head);
+  return gh(`/repos/${OWNER}/${repo}/compare/${seg}`, { per_page: "1" }, {
+    reduce: (d) => ({
+      status: d.status, ahead_by: d.ahead_by || 0, behind_by: d.behind_by || 0,
+      total_commits: d.total_commits || 0, branch: head, base: base, html_url: d.html_url,
+    }),
+  });
+}
+
+async function mainStatus(repo, baseTag) {
+  if (!baseTag) return null;
+  try {
+    return await compareRepo(repo, baseTag, "main");
+  } catch (e) {
+    if (!(e instanceof GhError && e.status === 404)) throw e;
+  }
+  // 'main' didn't resolve — look up the real default branch and retry once
+  try {
+    const branch = await gh(`/repos/${OWNER}/${repo}`, null, { reduce: (m) => (m && m.default_branch) || "master" });
+    if (branch !== "main") return await compareRepo(repo, baseTag, branch);
+  } catch (e) { /* fall through */ }
+  return { error: "could not compare branch to release tag" };
+}
+
+async function serviceVersion(svc, ref) {
+  // Best-effort: any failure returns null so one service can't fail the row.
+  if (!ref) return null;
+  try {
+    return await gh(`/repos/${OWNER}/${MONOREPO}/contents/services/${svc}/pyproject.toml`, { ref }, {
+      accept: "application/vnd.github.raw", raw: true,
+      reduce: (text) => { const m = VERSION_RE.exec(text || ""); return m ? m[1] : null; },
+    });
+  } catch (e) {
+    console.warn(`monorepo service ${svc}@${ref}: ${e.message} — version unavailable`);
+    return null;
+  }
+}
+
+async function fsbServices(tag, compose) {
+  return mapPool(Object.keys(FSB_SERVICES), 6, async (svc) => {
+    const [released, onMain] = await Promise.all([serviceVersion(svc, tag), serviceVersion(svc, "main")]);
+    const image = FSB_SERVICES[svc];
+    return {
+      service: svc, image, released, main: onMain,
+      changed: !!(released && onMain && released !== onMain),
+      testbed: testbedEntry(compose, image, released),
+    };
+  });
+}
+
+function parseCompose(text) {
+  const found = {};
+  for (const line of (text || "").split("\n")) {
+    const m = COMPOSE_IMAGE_RE.exec(line);
+    if (m) (found["ghga/" + m[1]] = found["ghga/" + m[1]] || new Set()).add(m[2]);
+  }
+  const result = {};
+  for (const [image, versions] of Object.entries(found)) {
+    const ordered = [...versions].sort();
+    result[image] = {
+      version: ordered.length === 1 ? ordered[0] : ordered.join(" / "),
+      versions: ordered, conflict: ordered.length > 1,
+    };
+  }
+  return result;
+}
+
+async function fetchTestbedVersions(ref) {
+  ref = ref || TESTBED_REF;
+  const meta = { repo: TESTBED_REPO, ref, path: TESTBED_COMPOSE_PATH };
+  let text;
+  try {
+    text = await gh(`/repos/${OWNER}/${TESTBED_REPO}/contents/${TESTBED_COMPOSE_PATH}`, { ref }, {
+      accept: "application/vnd.github.raw", raw: true,
+    });
+  } catch (e) {
+    meta.error = (e instanceof GhError && e.status === 404)
+      ? `branch '${ref}' or compose not found` : httpErrorText(e);
+    return Object.assign({ versions: {} }, meta);
+  }
+  const versions = parseCompose(text);
+  const tracked = new Set(STANDALONE_REPOS.map(r => "ghga/" + r).concat(Object.values(FSB_SERVICES)));
+  const untracked = Object.keys(versions).filter(i => !tracked.has(i)).sort();
+  return Object.assign({ versions, untracked, count: Object.keys(versions).length }, meta);
+}
+
+function semver(v) {
+  if (!v) return null;
+  const core = String(v).split(/[-+]/, 1)[0];
+  const parts = core.split(".").map(p => (/^\d+$/.test(p) ? +p : NaN));
+  return parts.some(isNaN) ? null : parts;
+}
+
+function cmpVersions(testbedV, latestV) {
+  if (!testbedV || !latestV) return "unknown";
+  if (testbedV === latestV) return "match";
+  const a = semver(testbedV), b = semver(latestV);
+  if (!a || !b) return "differs";
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a[i] || 0, y = b[i] || 0;
+    if (x < y) return "behind";
+    if (x > y) return "ahead";
+  }
+  return "match";
+}
+
+function testbedEntry(compose, image, latestVersion) {
+  const entry = (compose || {})[image];
+  if (!entry) return null;
+  return {
+    version: entry.version, image, conflict: !!entry.conflict,
+    vs_latest: entry.conflict ? "conflict" : cmpVersions(entry.version, latestVersion),
+  };
+}
+
+async function rateLimit() {
+  // Unmetered endpoint; reading it before and after a build reports what the
+  // build actually spent. Rethrows 401 so a bad token fails loudly, not as
+  // seventeen per-row "bad credentials" errors.
+  try {
+    return await gh("/rate_limit", null, {
+      noCache: true,
+      reduce: (d) => {
+        const c = (d && d.resources && d.resources.core) || {};
+        return { remaining: c.remaining, limit: c.limit, reset: c.reset };
+      },
+    });
+  } catch (e) {
+    if (e instanceof GhError && e.status === 401) throw e;
+    return null;
+  }
+}
+
+// ---- per-repo assembly + payload (ports build_repo / build_payload) ----
+async function buildRepo(repo, monorepo, compose, lite) {
+  const out = { repo, url: `https://github.com/${OWNER}/${repo}`, monorepo };
+  try {
+    const rel = await releaseInfo(repo, lite);
+    out.latest_release = rel.latest;
+    out.latest_prerelease = rel.prerelease;
+    out.release_count = rel.count;
+    out.open_prs = await openPrInfo(repo);
+    const base = rel.latest ? rel.latest.tag : (rel.prerelease ? rel.prerelease.tag : null);
+    out.main = lite ? { needs_token: true } : await mainStatus(repo, base);
+    if (monorepo && !lite) {
+      out.services = await fsbServices(base, compose);
+    } else if (!monorepo) {
+      out.testbed = testbedEntry(compose, "ghga/" + repo, out.latest_release ? out.latest_release.tag : null);
+    }
+  } catch (e) {
+    out.error = httpErrorText(e);
+    console.warn(`repo ${repo} failed:`, e);
+  }
+  return out;
+}
+
+async function buildPayloadDirect() {
+  const lite = !getToken();
+  const rateBefore = await rateLimit(); // also validates the token (throws on 401)
+  const testbed = lite
+    ? { repo: TESTBED_REPO, ref: TESTBED_REF, path: TESTBED_COMPOSE_PATH,
+        error: "token required (private repo)", versions: {} }
+    : await fetchTestbedVersions();
+  const compose = testbed.versions || {};
+  const repos = await mapPool([MONOREPO].concat(STANDALONE_REPOS), 8,
+    (r) => buildRepo(r, r === MONOREPO, compose, lite));
+  let rate = await rateLimit();
+  if (rateBefore && rate && rateBefore.remaining != null && rate.remaining != null) {
+    rate = Object.assign({}, rate, { used_last_build: rateBefore.remaining - rate.remaining });
+  }
+  const tbMeta = Object.assign({}, testbed); delete tbMeta.versions;
+  return {
+    generated_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+    owner: OWNER, authenticated: !lite, lite, rate, testbed: tbMeta, repos,
+  };
+}
+
+// 60s payload cache (parity with dashboard.py's CACHE_TTL): a browser reload
+// inside the window reuses the last build instead of re-spending API quota.
+const PAYLOAD_KEY = "ghdash.payload";
+function getCachedPayload() {
+  try {
+    const c = JSON.parse(sessionStorage.getItem(PAYLOAD_KEY) || "null");
+    if (c && Date.now() - c.at < PAYLOAD_TTL && c.lite === !getToken()) return c.data;
+  } catch (e) {}
+  return null;
+}
+async function getDataDirect(force) {
+  if (!force) {
+    const hit = getCachedPayload();
+    if (hit) return Object.assign({}, hit, { cached: true });
+  }
+  const data = await buildPayloadDirect();
+  try { sessionStorage.setItem(PAYLOAD_KEY, JSON.stringify({ at: Date.now(), lite: !!data.lite, data })); } catch (e) {}
+  return Object.assign({}, data, { cached: false });
+}
+
+// Branch override in direct mode: one compose fetch, then recompute the
+// test-bed column against the release data already on screen.
+async function testbedOverridesDirect(ref) {
+  if (!getToken()) return { ref, error: "token required (private repo)" };
+  const tb = await fetchTestbedVersions(ref);
+  const compose = tb.versions || {};
+  const reposOver = {}, servicesOver = {};
+  for (const r of ((state.data && state.data.repos) || [])) {
+    if (r.monorepo) {
+      for (const s of (r.services || [])) servicesOver[s.service] = testbedEntry(compose, s.image, s.released);
+    } else {
+      reposOver[r.repo] = testbedEntry(compose, "ghga/" + r.repo,
+        r.latest_release ? r.latest_release.tag : null);
+    }
+  }
+  return { repo: tb.repo, ref: tb.ref, count: tb.count || 0, untracked: tb.untracked || [],
+           error: tb.error, repos: reposOver, services: servicesOver };
+}
+
+// ---- mode detection ---------------------------------------------------------
+async function detectMode() {
+  // dashboard.py answers /healthz; GitHub Pages (or file://) has no backend.
+  if (location.protocol === "file:") return "direct";
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 1500);
+    const res = await fetch("/healthz", { cache: "no-store", signal: ctl.signal });
+    clearTimeout(t);
+    if (res.ok && (await res.text()).trim() === "ok") return "backend";
+  } catch (e) {}
+  return "direct";
+}
+
+// ---- data fetching --------------------------------------------------------
+async function load(force) {
+  const btn = $("#refresh");
+  btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = '<span class="spin"></span> Loading…';
+  try {
+    if (MODE === "backend") {
+      const res = await fetch("/api/data" + (force ? "?refresh=1" : ""), { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      state.data = await res.json();
+    } else {
+      state.data = await getDataDirect(force);
+    }
+    if (state.data.error) {
+      $("#rows").innerHTML = `<tr><td colspan="6" class="center err">⚠ ${esc(state.data.error)}</td></tr>`;
+    } else {
+      render();
+      // if a branch override is active, recompute it against the fresh release data
+      if (state.tbRef) applyTestbedBranch(state.tbRef, { force });
+    }
+  } catch (e) {
+    const hint = MODE === "backend"
+      ? `Could not reach the backend (${esc(e.message)}).<br>Is <code>dashboard.py</code> running?`
+      : (e instanceof GhError && e.status === 401)
+        ? `GitHub rejected the token (401).<br><button class="small" data-token-open>Replace token</button>`
+        : `Could not load data from GitHub (${esc(e instanceof GhError ? httpErrorText(e) : e.message)}).`;
+    if (state.data && state.data.repos) {
+      // keep the last good view; surface the failure instead of clobbering it
+      render();
+      $("#banner").innerHTML =
+        `<div class="banner hot">⚠ Refresh failed — ${hint} Showing data from ${esc(relTime(state.data.generated_at))}.</div>`
+        + $("#banner").innerHTML;
+    } else {
+      $("#rows").innerHTML = `<tr><td colspan="6" class="center err">⚠ ${hint}</td></tr>`;
+    }
+  } finally {
+    btn.disabled = false; btn.innerHTML = old;
+  }
+}
+
+// ---- test-bed branch override ---------------------------------------------
+let _tbSeq = 0; // guards overlapping requests: only the latest may apply
+async function applyTestbedBranch(ref, opts) {
+  opts = opts || {};
+  ref = (ref || "").trim();
+  const seq = ++_tbSeq;
+  const status = $("#tbStatus");
+  // empty or "main" -> drop the override and show the default (main) values
+  if (!ref || ref.toLowerCase() === "main") {
+    const had = !!state.tbOverride;
+    state.tbRef = null; state.tbOverride = null;
+    if (status) status.innerHTML = "";
+    if (had && state.data) render();
+    return;
+  }
+  if (status) status.innerHTML = `<span class="spin"></span> loading ${esc(ref)}…`;
+  try {
+    let data;
+    if (MODE === "backend") {
+      const url = "/api/testbed?ref=" + encodeURIComponent(ref) + (opts.force ? "&refresh=1" : "");
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      data = await res.json();
+    } else {
+      data = await testbedOverridesDirect(ref);
+    }
+    if (seq !== _tbSeq) return; // a newer request or reset superseded this one
+    if (data.error) {
+      if (status) status.innerHTML = `<span class="err">⚠ ${esc(data.error)}</span> <a href="#" data-tbreset>reset</a>`;
+      return;
+    }
+    state.tbRef = data.ref; state.tbOverride = data;
+    if (status) status.innerHTML = `<span class="ok-text">▸ ${esc(data.ref)}</span> <a href="#" data-tbreset>reset to main</a>`;
+    if (state.data) render();
+  } catch (e) {
+    if (seq !== _tbSeq) return;
+    if (status) status.innerHTML = `<span class="err">⚠ ${esc(e.message)}</span>`;
+  }
+}
+
+// ---- export: latest service releases --------------------------------------
+let exportFmt = "image";
+function baseName(image) { return (image || "").replace(/^ghga\//, ""); }
+// one entry per service with a known latest release (monorepo expanded to services)
+function exportItems() {
+  const items = [];
+  for (const r of ((state.data && state.data.repos) || [])) {
+    if (r.monorepo) {
+      for (const s of (r.services || [])) if (s.released) items.push({ name: baseName(s.image) || s.service, version: s.released, image: s.image || ("ghga/" + s.service) });
+    } else if (r.latest_release && r.latest_release.tag) {
+      items.push({ name: r.repo, version: r.latest_release.tag, image: "ghga/" + r.repo });
+    }
+  }
+  items.sort((a, b) => a.name.localeCompare(b.name));
+  return items;
+}
+function formatExport(items, fmt) {
+  if (fmt === "image") return items.map(i => `${i.image}:${i.version}`).join("\n");
+  if (fmt === "colon") return items.map(i => `${i.name}: ${i.version}`).join("\n");
+  const w = items.reduce((m, i) => Math.max(m, i.name.length), 0);
+  return items.map(i => `${i.name.padEnd(w)}  ${i.version}`).join("\n");
+}
+function renderExport() { $("#exportText").value = formatExport(exportItems(), exportFmt); }
+function openExport() {
+  if (!state.data) return;
+  const items = exportItems();
+  const date = ((state.data.generated_at || "").slice(0, 10)) || new Date().toISOString().slice(0, 10);
+  const liteNote = state.data.lite ? " · lite mode — monorepo services need a token" : "";
+  $("#exportMeta").textContent = `${date} · ${items.length} services${liteNote}`;
+  renderExport();
+  $("#exportModal").style.display = "flex";
+}
+function closeExport() { $("#exportModal").style.display = "none"; }
+function flash(btn, msg) {
+  const old = btn.textContent; btn.textContent = msg; btn.disabled = true;
+  setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1200);
+}
+async function copyExport(btn) {
+  const text = $("#exportText").value;
+  try { await navigator.clipboard.writeText(text); flash(btn, "Copied ✓"); }
+  catch (e) { const ta = $("#exportText"); ta.focus(); ta.select(); flash(btn, "Press ⌘/Ctrl+C"); }
+}
+function downloadExport() {
+  const date = (((state.data && state.data.generated_at) || "").slice(0, 10)) || new Date().toISOString().slice(0, 10);
+  const blob = new Blob([$("#exportText").value + "\n"], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `ghga-latest-releases-${date}.txt`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ---- token modal ------------------------------------------------------------
+function updateTokenBtn() {
+  const btn = $("#tokenBtn");
+  btn.style.display = MODE === "backend" ? "none" : "";
+  btn.textContent = getToken() ? "Token ✓" : "Token";
+  btn.title = getToken()
+    ? "A token is set for this tab (sessionStorage). Click to replace or clear it."
+    : "Add a GitHub token to unlock all columns and 5,000 requests/hour.";
+}
+function openTokenModal() { $("#tokenInput").value = getToken(); $("#tokenModal").style.display = "flex"; $("#tokenInput").focus(); }
+function closeTokenModal() { $("#tokenModal").style.display = "none"; }
+function saveToken(value) {
+  setToken((value || "").trim());
+  try { sessionStorage.removeItem(PAYLOAD_KEY); } catch (e) {}
+  updateTokenBtn();
+  closeTokenModal();
+  load(true);
+}
+
+// ---- events ---------------------------------------------------------------
+$("#refresh").addEventListener("click", () => load(true));
+$("#tokenBtn").addEventListener("click", openTokenModal);
+$("#tokenClose").addEventListener("click", closeTokenModal);
+$("#tokenClose2").addEventListener("click", closeTokenModal);
+$("#tokenModal").addEventListener("click", e => { if (e.target === $("#tokenModal")) closeTokenModal(); });
+$("#tokenSave").addEventListener("click", () => saveToken($("#tokenInput").value));
+$("#tokenInput").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); saveToken($("#tokenInput").value); } });
+$("#tokenClear").addEventListener("click", () => saveToken(""));
+// "Add token" buttons rendered inside the banner / error rows
+document.addEventListener("click", e => { if (e.target.closest("[data-token-open]")) openTokenModal(); });
+$("#exportBtn").addEventListener("click", openExport);
+$("#exportClose").addEventListener("click", closeExport);
+$("#exportClose2").addEventListener("click", closeExport);
+$("#exportModal").addEventListener("click", e => { if (e.target === $("#exportModal")) closeExport(); });
+$("#exportCopy").addEventListener("click", e => copyExport(e.currentTarget));
+$("#exportDownload").addEventListener("click", downloadExport);
+document.querySelectorAll('input[name="efmt"]').forEach(el => el.addEventListener("change", e => { exportFmt = e.target.value; renderExport(); }));
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeExport(); closeTokenModal(); } });
+$("#tbApply").addEventListener("click", () => applyTestbedBranch($("#tbBranch").value));
+$("#tbBranch").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); applyTestbedBranch($("#tbBranch").value); } });
+$("#tbStatus").addEventListener("click", e => {
+  const a = e.target.closest("[data-tbreset]");
+  if (!a) return;
+  e.preventDefault();
+  $("#tbBranch").value = "";
+  applyTestbedBranch("");
+});
+$("#search").addEventListener("input", e => { state.query = e.target.value; if (state.data) render(); });
+$("#attn").addEventListener("change", e => { state.attn = e.target.checked; if (state.data) render(); });
+document.querySelectorAll("thead th[data-sort]").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.sort;
+  if (state.sortKey === k) state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+  else { state.sortKey = k; state.sortDir = k === "repo" ? "asc" : "desc"; }
+  if (state.data) render();
+}));
+$("#rows").addEventListener("click", e => {
+  const t = e.target.closest("[data-toggle]");
+  if (!t) return;
+  const repo = t.dataset.toggle;
+  state.open[repo] = !state.open[repo];
+  render();
+});
+
+// fetch on every page load (so a browser refresh shows current data);
+// mode is detected first so the data layer knows where to get it from
+(async () => {
+  $("#foot").innerHTML = `GHGA Service Dashboard <span class="mono">v${esc(APP_VERSION)}</span> · `
+    + `<a href="https://github.com/${OWNER}/service-dashboard" target="_blank" rel="noopener">source</a>`;
+  MODE = await detectMode();
+  updateTokenBtn();
+  load(false);
+})();
+</script>
+</body>
+</html>
