@@ -13,13 +13,12 @@ For the ``file-services-backend`` monorepo it additionally reports each
 service's version (from ``services/<svc>/pyproject.toml``) at the latest
 release tag and on ``main``, so you can see which service drifted.
 
-Repository list / access derived from the existing helper scripts
-``fsb-versions.sh`` (the monorepo) and ``latest_releases.sh`` (standalone repos).
-
 Run
 ---
     export GITHUB_TOKEN=ghp_xxxxxxxx       # PAT with read access to the repos
     python3 dashboard.py                   # then open http://127.0.0.1:8888
+    python3 dashboard.py build data.json   # build the static payload and exit
+                                           # (used by the GitHub Pages workflow)
 
 A token is effectively required: GitHub allows only 60 unauthenticated
 requests/hour, and one refresh makes ~80 calls. For public repos a token with
@@ -37,6 +36,7 @@ import logging
 import os
 import random
 import re
+import sys
 import threading
 import time
 import urllib.error
@@ -450,7 +450,7 @@ def _semver(v):
     """Parse 'X.Y.Z…' into a tuple of ints (ignoring any -pre/+build), or None."""
     if not v:
         return None
-    core = re.split(r"[-+]", v, 1)[0]
+    core = re.split(r"[-+]", v, maxsplit=1)[0]
     try:
         return tuple(int(p) for p in core.split("."))
     except ValueError:
@@ -747,12 +747,41 @@ class Handler(BaseHTTPRequestHandler):
     do_HEAD = do_GET
 
 
-def main():
+def _setup_logging():
     logging.basicConfig(
         level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
         format="%(asctime)s %(levelname)-7s %(message)s",
         datefmt="%H:%M:%S",
     )
+
+
+def build_static(out_path="data.json"):
+    """Build the dashboard payload once and write it to a JSON file.
+
+    This is what the GitHub Pages build (a scheduled Action) runs so the
+    published page can read a prebuilt data.json instead of ever handling a
+    GitHub token in the browser. The token is read from the environment exactly
+    as the server does. The volatile 'rate' block is dropped (it reflects the
+    build's own API quota, meaningless to a viewer) and 'mode' is stamped so the
+    page can tell it is serving prebuilt data.
+    """
+    if not TOKEN:
+        log.warning(
+            "no GITHUB_TOKEN/GH_TOKEN set — the build will hit GitHub's 60/hour "
+            "unauthenticated limit and most rows will show errors"
+        )
+    data = build_payload()
+    static = {k: v for k, v in data.items() if k != "rate"}
+    static["mode"] = "static"
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(static, fh, separators=(",", ":"))
+    log.info("wrote %s — %d repos, generated_at %s",
+             out_path, len(static.get("repos", [])), static.get("generated_at"))
+    return static
+
+
+def main():
+    _setup_logging()
     if not TOKEN:
         log.warning(
             "no GITHUB_TOKEN/GH_TOKEN set — GitHub permits only 60 unauthenticated "
@@ -774,4 +803,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # `python3 dashboard.py build [out.json]` builds the static payload and exits
+    # (used by the Pages workflow); with no args it runs the live server.
+    if len(sys.argv) > 1 and sys.argv[1] == "build":
+        _setup_logging()
+        build_static(sys.argv[2] if len(sys.argv) > 2 else "data.json")
+    else:
+        main()

@@ -15,3 +15,7 @@ venv/
 *.key
 *.p12
 *.pfx
+
+# Build output — the Pages workflow generates data.json at build time; the
+# published copy lives only in the deploy artifact, never in the repo.
+data.json

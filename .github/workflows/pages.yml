@@ -1,6 +1,8 @@
 name: Deploy to GitHub Pages
 
 on:
+  # Rebuilds run on push to main and on demand only (no schedule): a maintainer
+  # triggers "Run workflow" (workflow_dispatch) to refresh the published data.
   push:
     branches: [main]
   workflow_dispatch:
@@ -22,12 +24,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # enablement: true lets this action create the Pages site on first run,
-      # so no manual "Settings -> Pages -> Source: GitHub Actions" step is needed.
       # Requires Pages to be allowed for the repo/org.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      # Build the static payload with the org token. The token exists only in
+      # this job (from the DASHBOARD_TOKEN Actions secret) and is never shipped
+      # to the browser. ubuntu-latest already has python3; dashboard.py is stdlib
+      # only, so no install step is needed.
+      - name: Build data.json
+        env:
+          GH_TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
+        run: python3 dashboard.py build data.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
