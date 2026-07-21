@@ -29,6 +29,7 @@ jobs:
         with:
           client-id: ${{ secrets.DASHBOARD_APP_ID }}
           private-key: ${{ secrets.DASHBOARD_APP_KEY }}
+          owner: ghga-de
       - uses: actions/checkout@v4
       # Requires Pages to be allowed for the repo/org.
       - uses: actions/configure-pages@v5
